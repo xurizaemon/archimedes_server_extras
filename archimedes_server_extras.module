@@ -1,0 +1,219 @@
+<?php
+/**
+ * @file
+ * Code for the Archimedes Munin Feature feature.
+ */
+
+include_once 'archimedes_server_extras.features.inc';
+
+/**
+ * Implements hook_field_formatter_info().
+ */
+function archimedes_server_extras_field_formatter_info() {
+  return array(
+    'munin_value_formatter' => array(
+      'label' => t('Munin Value'),
+      'field types' => array(
+        'text',
+        'link_field'
+      ),
+    ),
+    'munin_label_formatter' => array(
+      'label' => t('Munin Label'),
+      'field types' => array(
+        'text',
+        'link_field'
+      ),
+    ),
+    'munin_formatter' => array(
+      'label' => t('Munin Label'),
+      'field types' => array(
+        'text',
+        'link_field'
+      ),
+    ),
+  );
+}
+
+/**
+ *
+ */
+function archimedes_server_extras_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  switch ($display['type']) {
+    case 'munin_formatter':
+      foreach ($items as $delta => $item) {
+        // Prefer URL if available.
+        if (isset($item['url'])) {
+          $url = parse_url($item['url']);
+          $element[$delta] = array(
+            '#markup' => preg_replace('/[\.-]/', '_', $url['host']),
+          );
+        }
+      }
+      break;
+
+    case 'munin_value_formatter':
+      foreach ($items as $delta => $item) {
+        // Prefer URL if available.
+        if (isset($item['url'])) {
+          $url = parse_url($item['url']);
+          $element[$delta] = array(
+            '#markup' => _archimedes_munin_format($url['host']) . '.value',
+          );
+        }
+      }
+      break;
+
+    case 'munin_label_formatter':
+      foreach ($items as $delta => $item) {
+        // Prefer URL if available.
+        if (isset($item['url'])) {
+          $url = parse_url($item['url']);
+          $element[$delta] = array(
+            '#markup' => _archimedes_munin_format($url['host']) . '.label',
+          );
+        }
+      }
+      break;
+  }
+  return $element;
+}
+
+/**
+ * Implements hook_menu().
+ */
+function archimedes_server_extras_menu() {
+  $items['munin/config/sites'] = array(
+    'title' => t('Munin Config - Sites'),
+    'access callback' => 'archimedes_munin_access_callback',
+    'page callback' => 'archimedes_server_extras_munin_config_sites_page',
+    'description' => t('Munin Configuration Snippet'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'archimedes_server_extras.pages.inc',
+  );
+  $items['nagios/config/sites'] = array(
+    'title' => t('Nagios Config - Sites'),
+    'access callback' => 'archimedes_munin_access_callback',
+    'page callback' => 'archimedes_server_extras_nagios_config_sites_page',
+    'description' => t('Nagios Configuration Snippet'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'archimedes_server_extras.pages.inc',
+  );
+  $items['drush/aliases'] = array(
+    'title' => t('Drush aliases'),
+    'access callback' => 'archimedes_munin_access_callback',
+    'page callback' => 'archimedes_server_extras_drush_aliases_page',
+    'description' => t('Drush aliases'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'archimedes_server_extras.pages.inc',
+  );
+  return $items;
+}
+
+/**
+ * Turn a string into valid Munin label.
+ */
+function _archimedes_munin_format($string) {
+  return preg_replace('/[^a-zA-Z0-9]/', '_', $string);
+}
+
+/**
+ * Access callback for Munin pages.
+ */
+function archimedes_munin_access_callback() {
+  if (isset($_SERVER['HTTP_ARCHIMEDES_APIKEY'])) {
+    $role = 'access content';
+    if (_archimedes_server_extras_apikey_authenticate($role, $_SERVER['HTTP_ARCHIMEDES_APIKEY'])) {
+      return TRUE;
+    }
+  }
+
+  $permitted_hosts = variable_get('archimedes_server_extras_permitted_hosts', array());
+  foreach ($permitted_hosts as $host) {
+    $permitted_ips[] = gethostbyname($host);
+  }
+  if (in_array(gethostbyname(ip_address()), $permitted_ips)) {
+    return TRUE;
+  }
+  return user_access('administer site configuration');
+}
+
+/**
+ * Wrapper for API key authentication.
+ */
+function _archimedes_server_extras_apikey_authenticate($role, $apikey) {
+  if (!empty($apikey)) {
+    $query = new EntityFieldQuery();
+
+    $query->entityCondition('entity_type', 'user')
+      ->fieldCondition('field_api_key', 'value', $apikey, '=')
+      ->addMetaData('account', user_load(1)); // Run the query as user 1.
+    $results = $query->execute();
+    if (!empty($results['user'])) {
+      if ($accounts = user_load_multiple(array_keys($results['user']))) {
+        foreach ($accounts as $account) {
+          if (user_access($role, $account)) {
+            watchdog('archimedes_server_extras', 'API access granted for %name', array('%name' => $account->name), WATCHDOG_DEBUG);
+            return TRUE;
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_views_access_callbacks().
+ */
+function archimedes_server_extras_views_access_callbacks() {
+  return array(
+    'archimedes_munin_access_callback' => t('Fuzion Network Check'),
+  );
+}
+
+/**
+ * Implements hook_theme().
+ */
+function archimedes_server_extras_theme() {
+  return array(
+    'nagios_host_template' => array(
+      'template' => 'nagios-host-template',
+      'variables' => array(
+        'host' => NULL,
+        'alias' => NULL,
+        'address' => NULL,
+        'hostgroups' => NULL,
+        'use' => NULL,
+        'alias' => NULL,
+      ),
+      'path' => drupal_get_path('module', 'archimedes_server_extras') . '/theme',
+    ),
+    'nagios_site_template' => array(
+      'template' => 'nagios-site-template',
+      'variables' => array(
+        'host' => NULL,
+        'ssl' => NULL,
+        'url' => NULL,
+      ),
+      'path' => drupal_get_path('module', 'archimedes_server_extras') . '/theme',
+    ),
+    'nagios_googlesafebrowsing' => array(
+      'template' => 'nagios-googlesafebrowsing',
+      'variables' => array(
+        'host' => NULL,
+        'ssl' => NULL,
+        'url' => NULL,
+      ),
+      'path' => drupal_get_path('module', 'archimedes_server_extras') . '/theme',
+    ),
+    'drush_alias_entry' => array(
+      'template' => 'drush-alias-entry',
+      'variables' => array(
+        'uri' => NULL,
+        'root' => NULL,
+        'remote_host' => NULL,
+      ),
+      'path' => drupal_get_path('module', 'archimedes_server_extras') . '/theme',
+    ),
+  );
+}
